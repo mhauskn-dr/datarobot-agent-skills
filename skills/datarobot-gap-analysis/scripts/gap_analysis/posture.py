@@ -12,15 +12,19 @@ can't be surgically fixed — "fixing" them means restructuring someone else's b
 logic. When structural gaps dominate, lifting the business logic into a fresh, conformant
 af-components base (see migrate.py) is safer than in-place surgery.
 
-`structural` is a per-condition flag in taxonomy.yaml (any advisory high/critical also
-counts). Thresholds live under `posture:` in the policy.
+`structural` is a per-condition flag in taxonomy.yaml for Layers 1-3 (any advisory
+high/critical also counts); Layer 4 findings carry it directly on the Finding instead,
+since they're generated dynamically from a DataRobot risk-management policy rather
+than a taxonomy.yaml entry (almost always true there, since satisfying a mitigation
+nearly always means adopting a DataRobot platform feature, not patching code in
+place). Thresholds live under `posture:` in the policy.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from .models import AnalysisResult, Severity
+from .models import AnalysisResult, Finding, Severity
 from .taxonomy import Taxonomy
 
 # Severity weights — structural density is weighted, so a couple of critical structural
@@ -70,12 +74,19 @@ def assess_posture(
             "rationale": "No gaps detected — nothing to remediate or re-platform.",
         }
 
-    def is_structural(condition_id: str) -> bool:
-        c = tax.get(condition_id)
-        return bool(c and c.structural)
+    def is_structural(f: Finding) -> bool:
+        # Findings with a taxonomy.yaml entry (Layers 1-3) defer to the
+        # condition's own flag. Layer 4 findings are dynamically generated (no
+        # taxonomy entry, driven by the org's live DataRobot risk-management
+        # policy (see risk_management.py) and carry the flag on the Finding
+        # itself instead.
+        c = tax.get(f.condition_id)
+        if c is not None:
+            return bool(c.structural)
+        return bool(f.structural)
 
     total_weight = sum(_WEIGHT[f.severity] for f in findings)
-    structural = [f for f in findings if is_structural(f.condition_id)]
+    structural = [f for f in findings if is_structural(f)]
     structural_weight = sum(_WEIGHT[f.severity] for f in structural)
     score = round(structural_weight / total_weight, 3) if total_weight else 0.0
 

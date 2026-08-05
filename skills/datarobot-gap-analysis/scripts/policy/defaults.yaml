@@ -57,11 +57,15 @@ it_admin:
 
 regulatory:
   # Which regulatory packs (Layer 4) to run. Extensible: add gdpr, soc2, nist_ai_rmf.
+  # The eu_ai_act pack means "ask DataRobot risk-management what it requires,"
+  # not "run a fixed set of checks." No DataRobot connection means no findings
+  # for this pack, not a fallback to a generic checklist.
   packs:
     - "eu_ai_act"
-  # Declared/assumed risk tier for EU AI Act mapping context (informational):
-  #   prohibited | high | limited | minimal | gpai | unknown
-  eu_ai_act_risk_tier: "unknown"
+  # Name of the DataRobot risk-management policy to look up for the eu_ai_act
+  # pack. Change this if the org's policy isn't named "EU AI Act" (e.g. a
+  # custom policy they authored under a different name).
+  policy_name: "EU AI Act"
 
 # Per-condition severity overrides (key = condition id)
 severity_overrides: {}

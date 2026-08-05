@@ -1,7 +1,12 @@
 # Copyright (c) 2026 DataRobot, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Layer 2 (LLM reasoning) and Layer 4 (regulatory) detection runners."""
+"""Layer 2 (LLM reasoning over code) detection runner.
+
+Layer 4 (regulatory) lives entirely in risk_management.py: it's driven by a
+live DataRobot risk-management policy rather than taxonomy.yaml conditions,
+so it has no LLM-prompt-based runner here.
+"""
 
 from __future__ import annotations
 
@@ -138,43 +143,6 @@ def run_layer2(
     for i, cond in enumerate(conds, 1):
         if progress:
             progress(f"Layer 2 (LLM reasoning): {cond.id} [{i}/{len(conds)}]")
-        f, skip = run_condition(client, workspace, inventory, cond, contract, max_bytes)
-        findings += f
-        if skip:
-            skips.append(skip)
-    return findings, skips, notes
-
-
-def run_layer4(
-    client: LLMClient | None,
-    workspace,
-    inventory,
-    taxonomy: Taxonomy,
-    packs: list[str],
-    max_bytes: int = _DEFAULT_MAX_BYTES,
-    progress=None,
-) -> tuple[list[Finding], list[ConditionSkip], list[str]]:
-    notes: list[str] = []
-    # Currently only the eu_ai_act pack (POL-*) is implemented via prompts.
-    if "eu_ai_act" not in (packs or []):
-        return [], [], notes
-    if client is None:
-        skips = [
-            ConditionSkip(
-                c.id, "Layer 4 (regulatory) not run — no model client configured"
-            )
-            for c in taxonomy.by_layer(4)
-        ]
-        notes.append("Layer 4 (regulatory) skipped — no model client configured.")
-        return [], skips, notes
-    contract = (paths.prompts_dir() / "_contract.md").read_text()
-    workspace = Path(workspace)
-    findings: list[Finding] = []
-    skips: list[ConditionSkip] = []
-    conds = taxonomy.by_layer(4)
-    for i, cond in enumerate(conds, 1):
-        if progress:
-            progress(f"Layer 4 (EU AI Act): {cond.id} [{i}/{len(conds)}]")
         f, skip = run_condition(client, workspace, inventory, cond, contract, max_bytes)
         findings += f
         if skip:

@@ -31,15 +31,17 @@ CONFORMANCE_ROWS = [
     ("ITA-005", "Approved base image"),
     ("AIG-003", "Approved LLM model (gov)"),
 ]
-EU_ROWS = [
-    ("POL-001", "Risk classification"),
-    ("POL-002", "Transparency / disclosure"),
-    ("POL-003", "Technical documentation"),
-    ("POL-004", "Record-keeping / logging"),
-    ("POL-005", "Human oversight"),
-    ("POL-006", "Accuracy / robustness / security"),
-    ("POL-007", "Prohibited-practice screen"),
-]
+
+# Layer 4 (regulatory) has no fixed row list: it's driven entirely by whatever
+# the org's live DataRobot risk-management policy contains (see
+# risk_management.py), so the coverage table renders result.regulatory_coverage
+# instead of a static checklist.
+COVERAGE_STATUS_LABEL = {
+    "gap": "❌ gap",
+    "pass": "✅ evidence found",
+    "not_assessed": "❔ required, not assessed",
+    "unknown_type": "⚠ unrecognized mitigation type",
+}
 
 
 def _fix_label(f: Finding) -> str:
@@ -121,9 +123,9 @@ def render_report(
     lines.append("\n## IT Conformance Scorecard\n")
     lines.append(_conformance_table(result, policy or {}))
 
-    # EU AI Act coverage (Layer 4)
-    lines.append("\n## EU AI Act Coverage\n")
-    lines.append(_eu_table(result))
+    # DataRobot risk-management coverage (Layer 4)
+    lines.append("\n## DataRobot Risk-Management Coverage\n")
+    lines.append(_regulatory_coverage_table(result))
 
     # Skips & notes
     if result.skipped:
@@ -136,8 +138,8 @@ def render_report(
             lines.append(f"- {n}")
 
     lines.append(
-        "\n---\n_Secret values are never shown. EU AI Act findings are "
-        "advisory and not legal advice._"
+        "\n---\n_Secret values are never shown. DataRobot risk-management "
+        "findings are advisory and not legal advice._"
     )
     return "\n".join(lines)
 
@@ -183,16 +185,16 @@ def _conformance_table(result: AnalysisResult, policy: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-def _eu_table(result: AnalysisResult) -> str:
-    found_ids = {f.condition_id for f in result.findings}
-    skipped_ids = {s.condition_id for s in result.skipped}
-    out = ["| Article area | Status |", "|---|---|"]
-    for cid, label in EU_ROWS:
-        if cid in found_ids:
-            status = "❌ gap"
-        elif cid in skipped_ids:
-            status = "➖ not evaluated"
-        else:
-            status = "✅ evidence found"
-        out.append(f"| {cid} — {label} | {status} |")
+def _regulatory_coverage_table(result: AnalysisResult) -> str:
+    if not result.regulatory_coverage:
+        return (
+            "_No DataRobot risk-management policy was reachable for this run "
+            "(see Engine Notes below for why); nothing to show here. There is "
+            "no local fallback checklist, this section is empty rather than "
+            "misleadingly reassuring._"
+        )
+    out = ["| Mitigation | Status |", "|---|---|"]
+    for row in result.regulatory_coverage:
+        status = COVERAGE_STATUS_LABEL.get(row["status"], row["status"])
+        out.append(f"| {row['title']} | {status} |")
     return "\n".join(out)

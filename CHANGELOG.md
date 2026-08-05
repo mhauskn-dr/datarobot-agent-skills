@@ -13,7 +13,7 @@ Each entry should be prefixed with the affected skill folder name (for example,
 
 ## [1.6.0] - 2026-08-12
 
-- `datarobot-gap-analysis`: New skill. Scores any agent repository (DataRobot-built or not) against a 40-factor enterprise-readiness framework across seven risk pillars (Security, Identity, AI Governance, Reliability, Ops, IT Conformance, Regulatory & Policy) and four evaluation layers (deterministic scanning, dependency/supply-chain analysis, LLM-based code reasoning, configuration conformance), recommends a Patch/Hybrid/Re-platform remediation path, and can apply safe fixes on a dedicated branch. Vendors the `gap-analysis` engine prototype; hands off structural re-platform cases to `datarobot-agent-assist`.
+- `datarobot-gap-analysis`: New skill. Scores any agent repository (DataRobot-built or not) against an enterprise-readiness framework across seven risk pillars (Security, Identity, AI Governance, Reliability, Ops, IT Conformance, Regulatory & Policy) and four evaluation layers (deterministic scanning, LLM-based code reasoning, policy conformance, and a regulatory layer sourced dynamically from the org's DataRobot risk-management policy instead of a hardcoded checklist), recommends a Patch/Hybrid/Re-platform remediation path, and can apply safe fixes on a dedicated branch. Regulatory findings point at the DataRobot platform feature that satisfies each required mitigation. Vendors the `gap-analysis` engine prototype; hands off structural re-platform cases to `datarobot-agent-assist`.
 - `datarobot-agent-assist`: Mention `datarobot-gap-analysis` as a follow-up step after a successful deploy.
 
 ## [1.5.0] - 2026-08-10

@@ -6,11 +6,14 @@
 #
 # Fields per condition:
 #   id            stable identifier (PILLAR-NNN)
-#   pillar        SEC | IDN | AIG | OPS | REL | ITA | POL
+#   pillar        SEC | IDN | AIG | OPS | REL | ITA
 #   layer         1 = deterministic scanner
 #                 2 = LLM reasoning over code
 #                 3 = conformance vs. policy YAML
-#                 4 = regulatory mapping
+#
+# Layer 4 (regulatory / POL) conditions are not defined here: they are generated
+# at runtime from the mitigations the org's DataRobot risk-management policy
+# requires (see gap_analysis/risk_management.py and risk_management_mitigations.yaml).
 #   severity      critical | high | medium | low   (default; policy can override)
 #   title         short human-readable name
 #   description   what the gap is / why it matters
@@ -526,106 +529,3 @@ conditions:
     fix_type: assisted
     fix_strategy: prompts/fix-ita-005-base-image.md
     fix_risk: plumbing # swaps a Dockerfile base image; does not touch business logic
-
-  # ─────────────────────────────────────────────────────────────────────
-  # Pillar 4 — Regulatory Policy (POL) — EU AI Act control mapping
-  # ─────────────────────────────────────────────────────────────────────
-  - id: POL-001
-    pillar: POL
-    layer: 4
-    severity: high
-    title: EU AI Act — risk classification not established
-    description: >
-      No documented determination of the system's EU AI Act risk tier (prohibited / high-risk / limited / minimal) or GPAI
-      status.
-    files_glob: ["**/*.md", "**/docs/**", "**/*.py"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#risk-classification
-    remediation: Document the risk classification and applicable obligations.
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-002
-    pillar: POL
-    layer: 4
-    severity: medium
-    title: EU AI Act — transparency/disclosure obligation unmet
-    description: >
-      Users are not informed they are interacting with an AI system, and AI-generated content is not marked, where required.
-    files_glob: ["**/*.md", "**/docs/**", "**/*.py", "**/*.ts"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#transparency
-    remediation: Add AI-interaction disclosure and content marking.
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-003
-    pillar: POL
-    layer: 4
-    severity: medium
-    title: EU AI Act — technical documentation absent
-    description: >
-      Required technical documentation (intended purpose, design, data, capabilities/limits) is missing.
-    files_glob: ["**/*.md", "**/docs/**", "**/MODEL_CARD*", "**/model_card*"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#technical-documentation
-    remediation: Produce technical documentation / model card per Annex IV.
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-004
-    pillar: POL
-    layer: 4
-    severity: medium
-    title: EU AI Act — record-keeping / event logging insufficient
-    description: >
-      The system does not automatically log events/traces sufficient for traceability over its lifecycle.
-    files_glob: ["**/*.py", "**/*.ts"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#record-keeping
-    remediation: Add lifecycle event logging for traceability (links to OPS-001/002).
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-005
-    pillar: POL
-    layer: 4
-    severity: high
-    title: EU AI Act — human oversight not provided
-    description: >
-      No mechanism for human oversight/intervention over the AI system's operation.
-    files_glob: ["**/*.py", "**/*.ts", "**/docs/**"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#human-oversight
-    remediation: Provide human oversight controls (links to AIG-005).
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-006
-    pillar: POL
-    layer: 4
-    severity: medium
-    title: EU AI Act — accuracy/robustness/cybersecurity not evidenced
-    description: >
-      No evidence of accuracy metrics, robustness testing, or cybersecurity measures appropriate to the system.
-    files_glob: ["**/*.md", "**/docs/**", "**/eval*", "**/test*"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#accuracy-robustness
-    remediation: Document accuracy/robustness evaluation and cybersecurity measures.
-    fix_type: advisory
-    fix_strategy: null
-
-  - id: POL-007
-    pillar: POL
-    layer: 4
-    severity: critical
-    title: EU AI Act — prohibited practice indicator
-    description: >
-      Signals of an Article 5 prohibited practice (e.g. social scoring, manipulative techniques, untargeted facial scraping,
-      biometric categorization of sensitive traits).
-    files_glob: ["**/*.md", "**/docs/**", "**/*.py"]
-    relational: false
-    detector: prompts/pol-eu-ai-act.md#prohibited-practices
-    remediation: Cease/redesign any prohibited practice; seek legal review immediately.
-    fix_type: advisory
-    fix_strategy: null

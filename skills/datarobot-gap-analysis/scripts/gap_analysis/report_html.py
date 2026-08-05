@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import AnalysisResult, Finding, PILLARS
-from .report import CONFORMANCE_ROWS, EU_ROWS
+from .report import CONFORMANCE_ROWS, COVERAGE_STATUS_LABEL
 
 _SEV_LABEL = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
 _FIX_LABEL = {"auto": "auto-fix", "assisted": "assisted-fix", "advisory": "advisory"}
@@ -229,9 +229,8 @@ def render_html(
 
     # Scorecards
     found_ids = {f.condition_id for f in result.findings}
-    skipped_ids = {s.condition_id for s in result.skipped}
     body.append(_conformance_section(found_ids))
-    body.append(_eu_section(found_ids, skipped_ids))
+    body.append(_regulatory_coverage_section(result.regulatory_coverage))
 
     # Skips & notes
     if result.skipped:
@@ -246,8 +245,8 @@ def render_html(
         body.append("</ul></section>")
 
     body.append(
-        "<footer>Secret values are never shown. EU AI Act findings are advisory and "
-        "not legal advice.</footer>"
+        "<footer>Secret values are never shown. DataRobot risk-management "
+        "findings are advisory and not legal advice.</footer>"
     )
 
     return _DOC.replace("{{BODY}}", "\n".join(body))
@@ -369,19 +368,32 @@ def _conformance_section(found_ids: set[str]) -> str:
     )
 
 
-def _eu_section(found_ids: set[str], skipped_ids: set[str]) -> str:
+_STATUS_CSS_CLASS = {
+    "gap": "gap",
+    "pass": "pass",
+    "not_assessed": "skip",
+    "unknown_type": "skip",
+}
+
+
+def _regulatory_coverage_section(coverage: list[dict[str, str]]) -> str:
+    if not coverage:
+        return (
+            '<section class="scorecard"><h2>DataRobot Risk-Management Coverage</h2>'
+            '<p class="empty">No DataRobot risk-management policy was reachable '
+            "for this run (see Engine Notes below for why); nothing to show here. "
+            "There is no local fallback checklist, this section is empty rather "
+            "than misleadingly reassuring.</p></section>"
+        )
     rows = []
-    for cid, label in EU_ROWS:
-        if cid in found_ids:
-            status = '<span class="st gap">gap</span>'
-        elif cid in skipped_ids:
-            status = '<span class="st skip">not evaluated</span>'
-        else:
-            status = '<span class="st pass">evidence found</span>'
-        rows.append(f"<tr><td>{_esc(cid)} — {_esc(label)}</td><td>{status}</td></tr>")
+    for row in coverage:
+        label = COVERAGE_STATUS_LABEL.get(row["status"], row["status"])
+        css = _STATUS_CSS_CLASS.get(row["status"], "skip")
+        status = f'<span class="st {css}">{_esc(label)}</span>'
+        rows.append(f"<tr><td>{_esc(row['title'])}</td><td>{status}</td></tr>")
     return (
-        '<section class="scorecard"><h2>EU AI Act Coverage</h2>'
-        "<table><thead><tr><th>Article area</th><th>Status</th></tr></thead><tbody>"
+        '<section class="scorecard"><h2>DataRobot Risk-Management Coverage</h2>'
+        "<table><thead><tr><th>Mitigation</th><th>Status</th></tr></thead><tbody>"
         + "".join(rows)
         + "</tbody></table></section>"
     )

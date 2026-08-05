@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .conformance import check_conformance
-from .detect import run_layer2, run_layer4
+from .detect import run_layer2
 from .inventory import build_inventory
 from .llm import get_client
 from .migrate import extract_spec, scaffold_from_spec
@@ -17,6 +17,7 @@ from .models import AnalysisResult
 from .policy import load_policy
 from .posture import assess_posture
 from .remediate import remediate
+from .risk_management import EU_AI_ACT_POLICY_NAME, run_dynamic_layer4
 from .scanners import run_layer1
 from .taxonomy import Taxonomy
 
@@ -61,12 +62,10 @@ def analyze(
     result.findings += f3
     result.notes += n3
 
-    # Layers 2 & 4 — LLM reasoning + regulatory
+    # Layer 2: LLM reasoning
     client = get_client(llm_client) if use_llm else None
     if use_llm and client is None:
-        _tick(
-            "No LLM client configured — skipping Layers 2 & 4 (set GAP_LLM_MODEL + creds)."
-        )
+        _tick("No LLM client configured, skipping Layer 2 (set GAP_LLM_MODEL + creds).")
     f2, s2, n2 = run_layer2(
         client, workspace, result.inventory, taxonomy, max_bytes, _tick
     )
@@ -74,13 +73,26 @@ def analyze(
     result.skipped += s2
     result.notes += n2
 
+    # Layer 4: regulatory. The org's DataRobot risk-management policy decides
+    # what is required; the same LLM client judges whether the repo shows
+    # evidence for each requirement (see risk_management.py). Without an LLM,
+    # requirements are still fetched and reported as not assessed.
     packs = policy.get("regulatory", {}).get("packs", [])
-    f4, s4, n4 = run_layer4(
-        client, workspace, result.inventory, taxonomy, packs, max_bytes, _tick
-    )
-    result.findings += f4
-    result.skipped += s4
-    result.notes += n4
+    if "eu_ai_act" in (packs or []):
+        policy_name = policy.get("regulatory", {}).get(
+            "policy_name", EU_AI_ACT_POLICY_NAME
+        )
+        f4, coverage4, n4 = run_dynamic_layer4(
+            client,
+            workspace,
+            result.inventory,
+            policy_name,
+            max_bytes,
+            progress=_tick,
+        )
+        result.findings += f4
+        result.regulatory_coverage += coverage4
+        result.notes += n4
 
     result.findings = _dedup(result.findings)
     _tick("Scoring remediation posture…")

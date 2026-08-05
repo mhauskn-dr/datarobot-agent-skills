@@ -52,6 +52,9 @@ class Finding:
     confidence: str = "high"  # high | medium | low
     layer: int = 0
     detector: str = ""
+    structural: bool = False  # only meaningful for findings with no taxonomy.yaml
+    # entry (dynamically-generated Layer 4 findings); posture.py falls back to
+    # this when a taxonomy lookup by condition_id finds nothing.
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -76,6 +79,12 @@ class AnalysisResult:
     posture: dict[str, Any] = field(
         default_factory=dict
     )  # remediation posture (see posture.py)
+    # Every mitigation considered for Layer 4 (DataRobot risk-management), not just
+    # the ones that became findings, each is {mitigation_type, title, status},
+    # status one of "gap" | "pass" | "not_applicable" | "not_assessed". Lets the
+    # report render regulatory coverage without a fixed checklist to compare
+    # against (Layer 4 has no static condition list, see taxonomy.yaml).
+    regulatory_coverage: list[dict[str, str]] = field(default_factory=list)
 
     def by_severity(self) -> list[Finding]:
         return sorted(

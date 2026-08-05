@@ -95,7 +95,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--no-llm",
         action="store_true",
-        help="skip Layer-2/4 LLM checks (deterministic + conformance only)",
+        help="skip LLM checks: Layer 2 code reasoning entirely, and Layer 4's "
+        "per-mitigation evidence assessment (required mitigations are still "
+        "fetched from DataRobot risk-management and reported as not assessed). "
+        "Layers 1 and 3 always run.",
     )
     ap.add_argument(
         "--fix", action="store_true", help="apply fixes on a gap-fixes/* branch"
@@ -137,12 +140,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(
-        "→ Analyzing (Layer-2/4 LLM checks can take 1–2 min; use --no-llm to skip) …",
+        "→ Analyzing (Layer 2/4 LLM checks can take 1-2 min; use --no-llm to skip) …",
         file=sys.stderr,
         flush=True,
     )
     result, policy = analyze(
-        workspace, args.policy, use_llm=not args.no_llm, progress=progress
+        workspace,
+        args.policy,
+        use_llm=not args.no_llm,
+        progress=progress,
     )
     print(
         f"→ Analysis complete — {len(result.findings)} gaps "
@@ -225,7 +231,10 @@ def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
             after, _ = analyze(
-                workspace, args.policy, use_llm=not args.no_llm, progress=progress
+                workspace,
+                args.policy,
+                use_llm=not args.no_llm,
+                progress=progress,
             )
             before_keys = {(f.condition_id, f.file, f.line) for f in result.findings}
             after_keys = {(f.condition_id, f.file, f.line) for f in after.findings}

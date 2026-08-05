@@ -3,9 +3,11 @@
 
 """Locate the engine's data files (taxonomy, policy, prompts).
 
-Defaults to the repo root (two levels above this package). When the package is
-vendored into another project (e.g. the DataRobot agent template), set
-GAP_DATA_DIR to the directory that contains taxonomy.yaml, policy/, and prompts/.
+Defaults to the directory one level above this package (the `scripts/`
+directory this package's data files, taxonomy.yaml, policy/, prompts/, and
+risk_management_mitigations.yaml, are vendored into alongside it). When
+vendored at a different depth, set GAP_DATA_DIR to the directory that
+contains them.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-_DEFAULT_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def root() -> Path:
@@ -30,6 +32,10 @@ def policy_file() -> Path:
 
 def prompts_dir() -> Path:
     return root() / "prompts"
+
+
+def risk_management_mitigations_file() -> Path:
+    return root() / "risk_management_mitigations.yaml"
 
 
 def resolve(ref: str) -> Path:
