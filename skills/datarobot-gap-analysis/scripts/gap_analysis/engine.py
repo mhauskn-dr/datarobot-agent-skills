@@ -28,6 +28,7 @@ def analyze(
     llm_client=None,
     use_llm: bool = True,
     progress=None,
+    max_workers: int = 4,
 ) -> tuple[AnalysisResult, dict[str, Any]]:
     """Run all enabled layers over an already-available workspace.
 
@@ -67,7 +68,13 @@ def analyze(
     if use_llm and client is None:
         _tick("No LLM client configured, skipping Layer 2 (set GAP_LLM_MODEL + creds).")
     f2, s2, n2 = run_layer2(
-        client, workspace, result.inventory, taxonomy, max_bytes, _tick
+        client,
+        workspace,
+        result.inventory,
+        taxonomy,
+        max_bytes,
+        _tick,
+        max_workers=max_workers,
     )
     result.findings += f2
     result.skipped += s2
@@ -89,6 +96,7 @@ def analyze(
             policy_name,
             max_bytes,
             progress=_tick,
+            max_workers=max_workers,
         )
         result.findings += f4
         result.regulatory_coverage += coverage4

@@ -46,8 +46,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +64,8 @@ EU_AI_ACT_POLICY_NAME = "EU AI Act"
 _TIMEOUT_SECONDS = 15
 _MAX_FILES = 12  # cap files fed per mitigation, mirrors Layer 2's cap
 _PROMPT_FILE = "prompts/risk-management-mitigation.md"
+_DEFAULT_MAX_WORKERS = 4
+_SUBMIT_STAGGER_SECONDS = 0.25
 
 
 class RiskManagementClient:
@@ -275,6 +279,7 @@ def run_dynamic_layer4(
     max_bytes: int = 200_000,
     mitigation_metadata_path: str | Path | None = None,
     progress: Any = None,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
 ) -> tuple[list[Finding], list[dict[str, str]], list[str]]:
     """Run Layer 4: fetch the org's policy, LLM-assess each required mitigation.
 
@@ -321,9 +326,48 @@ def run_dynamic_layer4(
             "reported as not assessed instead of judged against the repo."
         )
 
+    # LLM-assess all judgeable mitigations in parallel; each assessment is an
+    # independent (prompt, files) completion, so only the aggregation below
+    # needs to stay in `required` order for deterministic output.
+    assessable = [
+        mt
+        for mt in required
+        if metadata.get(mt)
+        and metadata[mt].get("files_glob")
+        and llm_client is not None
+    ]
+    assessed: dict[str, tuple[str, dict[str, Any] | None, str | None]] = {}
+    if assessable:
+        done = 0
+        with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+            futures = {}
+            for i, mt in enumerate(assessable):
+                if i:
+                    time.sleep(_SUBMIT_STAGGER_SECONDS)
+                futures[
+                    pool.submit(
+                        _assess_mitigation,
+                        llm_client,
+                        workspace,
+                        inventory,
+                        mt,
+                        metadata[mt],
+                        prompt,
+                        contract,
+                        max_bytes,
+                    )
+                ] = mt
+            for future in as_completed(futures):
+                mt = futures[future]
+                done += 1
+                assessed[mt] = future.result()
+                _tick(
+                    f"Layer 4 (risk-management): {mt} done [{done}/{len(assessable)}]"
+                )
+
     findings: list[Finding] = []
     coverage: list[dict[str, str]] = []
-    for i, mitigation_type in enumerate(required, 1):
+    for mitigation_type in required:
         meta = metadata.get(mitigation_type)
         if meta is None:
             coverage.append(
@@ -343,18 +387,8 @@ def run_dynamic_layer4(
         verdict, item, skip_reason = "skipped", None, None
         if not meta.get("files_glob"):
             skip_reason = "organizational requirement, not assessable from code"
-        elif llm_client is not None:
-            _tick(f"Layer 4 (risk-management): {mitigation_type} [{i}/{len(required)}]")
-            verdict, item, skip_reason = _assess_mitigation(
-                llm_client,
-                workspace,
-                inventory,
-                mitigation_type,
-                meta,
-                prompt,
-                contract,
-                max_bytes,
-            )
+        elif mitigation_type in assessed:
+            verdict, item, skip_reason = assessed[mitigation_type]
 
         if verdict == "pass":
             coverage.append(

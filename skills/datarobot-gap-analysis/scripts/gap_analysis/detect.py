@@ -10,6 +10,8 @@ so it has no LLM-prompt-based runner here.
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ from .taxonomy import Condition, Taxonomy
 
 _MAX_FILES = 12  # cap files fed per condition
 _DEFAULT_MAX_BYTES = 200_000
+_DEFAULT_MAX_WORKERS = 4
+_SUBMIT_STAGGER_SECONDS = 0.25  # avoid a thundering herd on the LLM backend
 
 
 def _load_prompt(detector: str) -> str:
@@ -126,6 +130,7 @@ def run_layer2(
     taxonomy: Taxonomy,
     max_bytes: int = _DEFAULT_MAX_BYTES,
     progress=None,
+    max_workers: int = _DEFAULT_MAX_WORKERS,
 ) -> tuple[list[Finding], list[ConditionSkip], list[str]]:
     notes: list[str] = []
     if client is None:
@@ -137,13 +142,39 @@ def run_layer2(
         return [], skips, notes
     contract = (paths.prompts_dir() / "_contract.md").read_text()
     workspace = Path(workspace)
+    conds = taxonomy.by_layer(2)
+    results: dict[str, tuple[list[Finding], ConditionSkip | None]] = {}
+    done = 0
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+        futures = {}
+        for i, cond in enumerate(conds):
+            if i:
+                time.sleep(_SUBMIT_STAGGER_SECONDS)
+            futures[
+                pool.submit(
+                    run_condition,
+                    client,
+                    workspace,
+                    inventory,
+                    cond,
+                    contract,
+                    max_bytes,
+                )
+            ] = cond
+        for future in as_completed(futures):
+            cond = futures[future]
+            done += 1
+            results[cond.id] = future.result()
+            if progress:
+                progress(
+                    f"Layer 2 (LLM reasoning): {cond.id} done [{done}/{len(conds)}]"
+                )
+
+    # Aggregate in taxonomy order so reports stay deterministic across runs.
     findings: list[Finding] = []
     skips: list[ConditionSkip] = []
-    conds = taxonomy.by_layer(2)
-    for i, cond in enumerate(conds, 1):
-        if progress:
-            progress(f"Layer 2 (LLM reasoning): {cond.id} [{i}/{len(conds)}]")
-        f, skip = run_condition(client, workspace, inventory, cond, contract, max_bytes)
+    for cond in conds:
+        f, skip = results[cond.id]
         findings += f
         if skip:
             skips.append(skip)

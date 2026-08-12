@@ -40,6 +40,11 @@ Run in order before proceeding:
    https://docs.astral.sh/uv/getting-started/installation/ and stop. All script
    invocations below use `uv run`, which resolves the script's own dependencies
    (PyYAML) automatically — no manual `pip install` step.
+4. **DataRobot CLI** — run `dr --version`. If missing, invoke the
+   `datarobot-setup` skill to install it, then re-check. The LLM layers (2 and 4)
+   run through `dr opencode` workers authenticated by `dr auth`; without `dr` the
+   engine falls back to direct API calls via litellm (add `--with litellm` to the
+   `uv run` command in that case).
 
 ## Script Path Resolution
 
@@ -65,10 +70,12 @@ Ask for:
   supported — see [references/policy-authoring.md](references/policy-authoring.md).
 ### 2. Check for DataRobot credentials, run the assessment
 
-`DATAROBOT_API_TOKEN` + `DATAROBOT_ENDPOINT` power two things: the 20 Layer-2
-LLM-reasoning conditions (via the LLM Gateway; a `GAP_LLM_MODEL` override works for a
-non-DataRobot provider) and the Layer-4 regulatory checks (fetching the org's
-risk-management policy, then LLM-judging the repo against each required mitigation).
+The LLM checks — the 20 Layer-2 code-reasoning conditions and Layer-4's
+per-mitigation judging — run in parallel (default 4 workers, `--workers N`) through
+a private `dr opencode` server the engine starts and stops automatically,
+authenticated by the CLI's own login. `GAP_LLM_MODEL` overrides the model.
+`DATAROBOT_API_TOKEN` + `DATAROBOT_ENDPOINT` are still required for Layer 4's
+policy fetch from DataRobot risk-management.
 **If credentials are missing or invalid, invoke the `datarobot-setup` skill before
 retrying**, do not print manual setup instructions. If the user explicitly wants a
 fast pass, offer `--no-llm`: Layers 1 and 3 still run, and Layer 4 still fetches the

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import os
 import sys
 import webbrowser
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from .engine import analyze, fix
 from .ingest import clone_repo
+from .opencode import OpenCodeServer, OpenCodeWorkerClient, dr_available
 from .report import render_report
 from .report_html import render_html
 
@@ -51,6 +53,46 @@ def _load_env_file(path: str) -> list[str]:
             os.environ[key] = val
         loaded.append(key)
     return loaded
+
+
+def _make_llm_client():
+    """Return the LLM client for this run, or None to let the engine auto-detect.
+
+    Preferred backend is `dr opencode`: a private server is started on a free
+    port and every check attaches to it as a worker subprocess, authenticated
+    through the CLI's own login. `GAP_LLM_BACKEND=litellm` (or a missing `dr`)
+    falls back to direct gateway calls via litellm, which need
+    DATAROBOT_API_TOKEN/DATAROBOT_ENDPOINT (or GAP_LLM_MODEL provider creds).
+    The server is stopped at process exit, covering every CLI return path.
+    """
+    if os.environ.get("GAP_LLM_BACKEND", "opencode") != "opencode":
+        return None
+    if not dr_available():
+        print(
+            "→ dr CLI not found; LLM checks fall back to direct API calls (litellm).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    server = OpenCodeServer()
+    try:
+        url = server.start()
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"→ dr opencode server failed to start ({e}); "
+            "falling back to direct API calls (litellm).",
+            file=sys.stderr,
+            flush=True,
+        )
+        return None
+    atexit.register(server.stop)
+    client = OpenCodeWorkerClient(url)
+    print(
+        f"→ LLM checks run through dr opencode ({client.model}).",
+        file=sys.stderr,
+        flush=True,
+    )
+    return client
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -101,6 +143,12 @@ def main(argv: list[str] | None = None) -> int:
         "Layers 1 and 3 always run.",
     )
     ap.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.environ.get("GAP_WORKERS", "4")),
+        help="parallel workers for Layer 2/4 LLM checks (default: 4, or $GAP_WORKERS)",
+    )
+    ap.add_argument(
         "--fix", action="store_true", help="apply fixes on a gap-fixes/* branch"
     )
     ap.add_argument(
@@ -139,16 +187,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
 
+    llm_client = _make_llm_client() if not args.no_llm else None
+
     print(
-        "→ Analyzing (Layer 2/4 LLM checks can take 1-2 min; use --no-llm to skip) …",
+        "→ Analyzing (Layer 2/4 LLM checks run in parallel; use --no-llm to skip) …",
         file=sys.stderr,
         flush=True,
     )
     result, policy = analyze(
         workspace,
         args.policy,
+        llm_client=llm_client,
         use_llm=not args.no_llm,
         progress=progress,
+        max_workers=args.workers,
     )
     print(
         f"→ Analysis complete — {len(result.findings)} gaps "
@@ -187,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
             result,
             policy,
             ts,
+            llm_client=llm_client,
             selected_ids=selected,
             use_llm=not args.no_llm,
         )
@@ -233,8 +286,10 @@ def main(argv: list[str] | None = None) -> int:
             after, _ = analyze(
                 workspace,
                 args.policy,
+                llm_client=llm_client,
                 use_llm=not args.no_llm,
                 progress=progress,
+                max_workers=args.workers,
             )
             before_keys = {(f.condition_id, f.file, f.line) for f in result.findings}
             after_keys = {(f.condition_id, f.file, f.line) for f in after.findings}

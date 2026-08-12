@@ -15,9 +15,12 @@ so the PyYAML dependency above is resolved automatically, with no install step:
 
   uv run <skill_scripts_dir>/run_gap_analysis.py <repo-url-or-path> [options]
 
-For deeper Layer-1 scanning or Layer-2/4 LLM reasoning, add the optional extras:
+Layer-2/4 LLM reasoning runs through the `dr` CLI's opencode runtime when `dr`
+is installed (parallel workers, no extra Python deps, auth via `dr auth`).
+Without `dr` (or with GAP_LLM_BACKEND=litellm), add `--with litellm` for direct
+gateway calls. For deeper Layer-1 scanning, add the scanner extras:
 
-  uv run --with detect-secrets --with pip-audit --with semgrep --with litellm \\
+  uv run --with detect-secrets --with pip-audit --with semgrep \\
     <skill_scripts_dir>/run_gap_analysis.py <repo-url-or-path> [options]
 
 All CLI options are documented in gap_analysis.cli (`--help`).
