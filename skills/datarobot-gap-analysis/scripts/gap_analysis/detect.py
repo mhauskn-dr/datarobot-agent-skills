@@ -54,7 +54,9 @@ def _gather_files(
             continue
         if len(data.encode("utf-8", "ignore")) > max_bytes:
             data = data[:max_bytes] + "\n…[truncated]…"
-        out.append((rel, data))
+        # NUL bytes survive errors="ignore" but cannot travel in a subprocess
+        # argv (the opencode worker path) and break most JSON transports.
+        out.append((rel, data.replace("\x00", "")))
     return out
 
 

@@ -25,6 +25,7 @@ import urllib.request
 _DEFAULT_MODEL = "datarobot/anthropic/claude-sonnet-4-6"
 _SERVE_STARTUP_SECONDS = 30
 _WORKER_TIMEOUT_SECONDS = int(os.environ.get("GAP_OPENCODE_TIMEOUT", "120"))
+_MAX_MESSAGE_BYTES = 600_000  # stay under the OS argv limit (1 MiB on macOS)
 
 # A worker running inside OpenCode can recognize its own instructions as a
 # skill artifact and answer in prose, or wander into tool calls; only an
@@ -114,6 +115,14 @@ class OpenCodeWorkerClient:
 
     def complete(self, system: str, user: str) -> str:
         message = f"{_WORKER_PREAMBLE}{system}\n\n{user}"
+        # The message travels as a single argv entry: NUL is illegal there and
+        # the OS caps total argv size (1 MiB on macOS), so sanitize and bound.
+        message = message.replace("\x00", "")
+        raw = message.encode("utf-8", "ignore")
+        if len(raw) > _MAX_MESSAGE_BYTES:
+            message = (
+                raw[:_MAX_MESSAGE_BYTES].decode("utf-8", "ignore") + "\n…[truncated]…"
+            )
         cmd = [
             "dr",
             "--skip-plugin-update-check",

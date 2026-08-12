@@ -74,8 +74,10 @@ The LLM checks — the 20 Layer-2 code-reasoning conditions and Layer-4's
 per-mitigation judging — run in parallel (default 4 workers, `--workers N`) through
 a private `dr opencode` server the engine starts and stops automatically,
 authenticated by the CLI's own login. `GAP_LLM_MODEL` overrides the model.
-`DATAROBOT_API_TOKEN` + `DATAROBOT_ENDPOINT` are still required for Layer 4's
-policy fetch from DataRobot risk-management.
+Layer 4's policy fetch from DataRobot risk-management uses
+`DATAROBOT_API_TOKEN` + `DATAROBOT_ENDPOINT` when set, falling back to the dr
+CLI's own config (written by `dr auth login`), so a logged-in machine needs no
+env exports; `--env-file <path>` loads a project dotenv explicitly.
 **If credentials are missing or invalid, invoke the `datarobot-setup` skill before
 retrying**, do not print manual setup instructions. If the user explicitly wants a
 fast pass, offer `--no-llm`: Layers 1 and 3 still run, and Layer 4 still fetches the
@@ -94,12 +96,17 @@ as a live notification instead of a silent multi-minute wait. Fall back to Bash 
 output, shown at the end) on harnesses without a Monitor-equivalent.
 
 ```
-uv run <skill_scripts_dir>/run_gap_analysis.py <repo> \
+uv run --with detect-secrets --with pip-audit --with semgrep \
+  <skill_scripts_dir>/run_gap_analysis.py <repo> \
   --ref <ref>                    # optional
   --policy <path>                # optional
   --out gap-report.md            # or --html gap-report.html for a browser-viewable report
   --no-llm                       # optional: skip LLM checks (Layer 2, and Layer 4 evidence judging)
 ```
+
+The `--with` extras give Layer 1 its full scanners (secret scan, dependency CVEs,
+SAST); `uv` resolves them per run, nothing is installed globally. Dropping them
+still works — Layer 1 degrades to its built-in fallbacks and says so in the report.
 
 Full flag reference (including `--fix`, `--select`, `--verify`, `--env-file`): run
 `uv run <skill_scripts_dir>/run_gap_analysis.py --help`.

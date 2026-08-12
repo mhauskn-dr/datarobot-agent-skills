@@ -92,10 +92,28 @@ class RiskManagementClient:
             return None
 
 
+def _drconfig_credentials() -> tuple[str | None, str | None]:
+    """(endpoint, token) from the dr CLI / SDK config file, or (None, None)."""
+    cfg = Path.home() / ".config" / "datarobot" / "drconfig.yaml"
+    try:
+        data = yaml.safe_load(cfg.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None, None
+    return data.get("endpoint"), data.get("token")
+
+
 def get_client() -> RiskManagementClient | None:
-    """Return a client, or None if credentials aren't configured."""
+    """Return a client, or None if credentials aren't configured.
+
+    Env vars win; otherwise fall back to the dr CLI's config file, so a
+    `dr auth login`-ed machine needs no DATAROBOT_* exports for Layer 4.
+    """
     endpoint = os.environ.get("DATAROBOT_ENDPOINT")
     token = os.environ.get("DATAROBOT_API_TOKEN")
+    if not endpoint or not token:
+        cfg_endpoint, cfg_token = _drconfig_credentials()
+        endpoint = endpoint or cfg_endpoint
+        token = token or cfg_token
     if not endpoint or not token:
         return None
     return RiskManagementClient(endpoint, token)
@@ -185,7 +203,7 @@ def _gather_files(
             continue
         if len(data.encode("utf-8", "ignore")) > max_bytes:
             data = data[:max_bytes] + "\n…[truncated]…"
-        out.append((rel, data))
+        out.append((rel, data.replace("\x00", "")))
     return out
 
 
@@ -299,8 +317,9 @@ def run_dynamic_layer4(
     client = get_client()
     if client is None:
         notes.append(
-            "Layer 4 (DataRobot risk-management) skipped, "
-            "DATAROBOT_API_TOKEN/DATAROBOT_ENDPOINT aren't set."
+            "Layer 4 (DataRobot risk-management) skipped, no DataRobot "
+            "credentials found (DATAROBOT_API_TOKEN/DATAROBOT_ENDPOINT env "
+            "vars, or the dr CLI config written by `dr auth login`)."
         )
         return [], [], notes
 
