@@ -18,6 +18,7 @@ import os
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -50,19 +51,34 @@ def _free_port() -> int:
 
 
 class OpenCodeServer:
-    """Lifecycle of a private `dr opencode serve` on a free localhost port."""
+    """Lifecycle of a private `dr opencode serve` on a free localhost port.
+
+    The server runs in an empty temp directory: attached sessions take their
+    project context from the server's cwd, and inheriting the caller's cwd
+    would load that project's AGENTS.md/opencode config into every worker,
+    which derails the workers' output contract (observed as models refusing
+    the worker prompt or answering with tool calls instead of text).
+    """
 
     def __init__(self) -> None:
         self._proc: subprocess.Popen | None = None
+        self.workdir: str | None = None
         self.url: str | None = None
 
     def start(self) -> str:
         port = _free_port()
+        self.workdir = tempfile.mkdtemp(prefix="gap-opencode-")
+        # opencode sessions snapshot their project via git; in a git-less
+        # directory the event stream dies after step_start with exit 0.
+        subprocess.run(
+            ["git", "init", "-q", self.workdir], check=False, capture_output=True
+        )
         self._proc = subprocess.Popen(
             ["dr", "opencode", "serve", "--port", str(port)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
+            cwd=self.workdir,
         )
         url = f"http://127.0.0.1:{port}"
         deadline = time.monotonic() + _SERVE_STARTUP_SECONDS
@@ -84,14 +100,16 @@ class OpenCodeServer:
         )
 
     def stop(self) -> None:
-        if self._proc is None:
-            return
-        self._proc.terminate()
-        try:
-            self._proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self._proc.kill()
-        self._proc = None
+        if self._proc is not None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+            self._proc = None
+        if self.workdir is not None:
+            shutil.rmtree(self.workdir, ignore_errors=True)
+            self.workdir = None
         self.url = None
 
     def __enter__(self) -> "OpenCodeServer":
@@ -106,12 +124,17 @@ class OpenCodeWorkerClient:
     """LLMClient backed by `dr opencode run --attach <server>` subprocesses.
 
     Each complete() call is its own session on the shared server, so calls
-    are independent and safe to issue from multiple threads.
+    are independent and safe to issue from multiple threads. `cwd` should be
+    a directory without opencode project context (the server's workdir); see
+    OpenCodeServer.
     """
 
-    def __init__(self, server_url: str, model: str | None = None):
+    def __init__(
+        self, server_url: str, model: str | None = None, cwd: str | None = None
+    ):
         self.server_url = server_url
         self.model = model or os.environ.get("GAP_LLM_MODEL", _DEFAULT_MODEL)
+        self.cwd = cwd
 
     def complete(self, system: str, user: str) -> str:
         message = f"{_WORKER_PREAMBLE}{system}\n\n{user}"
@@ -139,13 +162,26 @@ class OpenCodeWorkerClient:
             "--pure",
             message,
         ]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_WORKER_TIMEOUT_SECONDS
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout or "").strip()[-500:]
-            raise RuntimeError(f"dr opencode run exited {result.returncode}: {detail}")
-        return _extract_text(result.stdout)
+        last_error: Exception | None = None
+        for _ in range(2):
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=_WORKER_TIMEOUT_SECONDS,
+                cwd=self.cwd,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout or "").strip()[-500:]
+                raise RuntimeError(
+                    f"dr opencode run exited {result.returncode}: {detail}"
+                )
+            try:
+                return _extract_text(result.stdout)
+            except ValueError as e:
+                detail = (result.stderr or result.stdout or "").strip()[:300]
+                last_error = ValueError(f"{e} (output head: {detail!r})")
+        raise last_error
 
 
 def _extract_text(stdout: str) -> str:

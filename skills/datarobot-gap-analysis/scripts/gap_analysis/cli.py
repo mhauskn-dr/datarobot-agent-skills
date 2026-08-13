@@ -86,7 +86,7 @@ def _make_llm_client():
         )
         return None
     atexit.register(server.stop)
-    client = OpenCodeWorkerClient(url)
+    client = OpenCodeWorkerClient(url, cwd=server.workdir)
     print(
         f"→ LLM checks run through dr opencode ({client.model}).",
         file=sys.stderr,
