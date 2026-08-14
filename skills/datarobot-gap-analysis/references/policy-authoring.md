@@ -29,7 +29,7 @@ it_admin:
 
 regulatory:
   packs: ["eu_ai_act"]             # which Layer-4 packs to run
-  policy_name: "EU AI Act"          # which DataRobot risk-management policy Layer 4 looks up
+  policy_name: "EU AI Act"          # policy name or id; on a name collision the org's own policy wins over the built-in
 
 severity_overrides:
   SEC-011: critical                 # bump/lower a specific condition's severity (Layers 1-3)

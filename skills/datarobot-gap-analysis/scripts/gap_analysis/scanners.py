@@ -226,6 +226,89 @@ def run_sca(
     return findings, notes
 
 
+def run_sca_npm(
+    workspace: str | Path, taxonomy: Taxonomy
+) -> tuple[list[Finding], list[str]]:
+    """SEC-010 — JavaScript dependency vulnerabilities via `npm audit`.
+
+    Runs against each package-lock.json from the lockfile alone (no
+    node_modules, no install). Findings are advisory: the auto bump codemod
+    only understands Python requirement files, so npm upgrades stay a manual
+    (or `npm audit fix`) step.
+    """
+    root = Path(workspace)
+    notes: list[str] = []
+    findings: list[Finding] = []
+    cond = taxonomy.get("SEC-010")
+    if not cond:
+        return findings, notes
+    lockfiles = [
+        p
+        for p in root.rglob("package-lock.json")
+        if "node_modules" not in p.parts and ".venv" not in p.parts
+    ]
+    if not lockfiles:
+        return findings, notes
+    if not shutil.which("npm"):
+        notes.append(
+            "SEC-010: package-lock.json present but npm is not installed — "
+            "JavaScript dependency CVE scan skipped."
+        )
+        return findings, notes
+
+    for lock in lockfiles:
+        rel = lock.relative_to(root).as_posix()
+        try:
+            # npm audit exits non-zero when vulnerabilities exist; parse stdout
+            # regardless of the exit code.
+            proc = subprocess.run(
+                ["npm", "audit", "--package-lock-only", "--json"],
+                cwd=lock.parent,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            data = json.loads(proc.stdout or "{}")
+            vulns = data.get("vulnerabilities", {}) or {}
+            for name, info in vulns.items():
+                advisories = [
+                    v for v in info.get("via", []) or [] if isinstance(v, dict)
+                ]
+                if not advisories:
+                    continue  # transitive echo of another reported package
+                titles = "; ".join(a.get("title", "") for a in advisories[:3])
+                fix = info.get("fixAvailable")
+                fix_txt = (
+                    f"fix available via {fix['name']}@{fix['version']}"
+                    if isinstance(fix, dict)
+                    else (
+                        "fix available via `npm audit fix`"
+                        if fix
+                        else "no fix released yet"
+                    )
+                )
+                f = _mk(
+                    cond,
+                    rel,
+                    None,
+                    f"{name}@{info.get('range', '?')} — {info.get('severity', '?')}",
+                    f"Known npm vulnerability: {titles}; {fix_txt}.",
+                )
+                f.detector = "npm-audit"
+                f.fix_type = "advisory"
+                f.fix_strategy = None
+                f.fix_risk = "none"
+                findings.append(f)
+        except (
+            subprocess.TimeoutExpired,
+            OSError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as e:
+            notes.append(f"SEC-010: npm audit failed on {rel}: {e}")
+    return findings, notes
+
+
 def run_sast(
     workspace: str | Path, taxonomy: Taxonomy
 ) -> tuple[list[Finding], list[str]]:
@@ -335,14 +418,26 @@ def _mk(cond, file, line, evidence, explanation) -> Finding:
     )
 
 
-def run_layer1(workspace, taxonomy, exclude=None) -> tuple[list[Finding], list[str]]:
+def run_layer1(
+    workspace, taxonomy, exclude=None, progress=None
+) -> tuple[list[Finding], list[str]]:
+    def _tick(msg: str) -> None:
+        if progress:
+            progress(msg)
+
     findings: list[Finding] = []
     notes: list[str] = []
-    for fn in (run_secret_scan,):
-        f, n = fn(workspace, taxonomy, exclude)
-        findings += f
-        notes += n
-    for fn in (run_sca, run_sast, check_presence):
+    _tick("Layer 1: secret scan…")
+    f, n = run_secret_scan(workspace, taxonomy, exclude)
+    findings += f
+    notes += n
+    for label, fn in (
+        ("dependency CVEs (pip-audit)", run_sca),
+        ("npm dependency CVEs (npm audit)", run_sca_npm),
+        ("SAST (semgrep)", run_sast),
+        ("tests/CI presence", check_presence),
+    ):
+        _tick(f"Layer 1: {label}…")
         f, n = fn(workspace, taxonomy)
         findings += f
         notes += n

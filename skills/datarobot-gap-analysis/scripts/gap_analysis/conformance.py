@@ -126,11 +126,27 @@ def check_conformance(
                     )
                 )
 
-    # ITA-004 — license check is best handled with metadata not present offline.
-    if taxonomy.get("ITA-004") and (it.get("licenses", {}) or {}).get("deny"):
+    # ITA-004 — offline coverage is limited to the repo's own declared license
+    # (package.json / pyproject.toml); dependency licenses need registry or
+    # installed-package metadata.
+    cond = taxonomy.get("ITA-004")
+    deny_licenses = (it.get("licenses", {}) or {}).get("deny") or []
+    if cond and deny_licenses:
+        for rel, lic in inventory.get("declared_licenses", []) or []:
+            if lic in deny_licenses:
+                findings.append(
+                    _mk(
+                        cond,
+                        rel,
+                        None,
+                        lic,
+                        f"Manifest declares license '{lic}', which is on the "
+                        "org's denied-license list.",
+                    )
+                )
         notes.append(
-            "ITA-004: license scan requires installed package metadata; "
-            "run with the deployed agent's environment for full results."
+            "ITA-004: dependency licenses require installed package metadata; "
+            "only the repo's own declared license was checked offline."
         )
 
     return findings, notes

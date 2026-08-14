@@ -145,6 +145,11 @@ def run_layer2(
     contract = (paths.prompts_dir() / "_contract.md").read_text()
     workspace = Path(workspace)
     conds = taxonomy.by_layer(2)
+    if progress:
+        progress(
+            f"▶ Layer 2 (LLM reasoning): starting {len(conds)} checks "
+            f"({max(1, max_workers)} workers)…"
+        )
     results: dict[str, tuple[list[Finding], ConditionSkip | None]] = {}
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:

@@ -9,6 +9,14 @@ DataRobot platform at deployment time (for example, DataRobot af-components
 infrastructure code, deployment metadata enabling monitoring or guards, or
 DataRobot SDK/gateway usage that carries the capability).
 
+Infrastructure-as-code counts as that wiring: pulumi-datarobot resources are
+first-class evidence. A `datarobot.Deployment` with the relevant settings block
+(drift tracking, association ids, bias and fairness), a `datarobot.CustomModel`
+with a matching `guard_configurations` entry, or a `datarobot.NotificationPolicy`
+on the deployment each satisfy their mitigation exactly as the platform expects.
+When the mitigation block below carries an "infrastructure-as-code evidence"
+line, treat that as the authoritative description of what to look for in IaC.
+
 The specific mitigation under assessment is described in a block at the end of
 this system prompt: what it requires, and what counts as evidence.
 

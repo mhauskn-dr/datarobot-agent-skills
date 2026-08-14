@@ -45,10 +45,15 @@ offers:
   scope, adding validation, adding retries, adding guardrails).
 - **advisory**: written guidance only; no automated fix exists (these are also the
   findings most likely to be flagged `structural`, see
-  [remediation-paths.md](remediation-paths.md)). Every Layer 4 finding is advisory:
-  satisfying a risk-management mitigation almost always means adopting the
+  [remediation-paths.md](remediation-paths.md)). Layer 4 findings are advisory by
+  default: satisfying a risk-management mitigation almost always means adopting the
   corresponding DataRobot platform feature (deployment monitoring, GenAI Guards,
-  RBAC, Model Registry documentation), not patching the repo in place.
+  RBAC, Model Registry documentation), not patching the repo in place. The
+  exception: on a repo that already carries a pulumi-datarobot program, the
+  mitigations enabled by IaC (deployment drift/accuracy/fairness settings,
+  notification policies, guard configurations) become **assisted** fixes that
+  propose the missing settings block into the existing Pulumi resources, and stop
+  counting as structural.
 
 ## Extending the framework
 

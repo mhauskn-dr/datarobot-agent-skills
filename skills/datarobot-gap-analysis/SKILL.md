@@ -95,25 +95,44 @@ Invoke via the **Monitor tool if available**, so the developer sees each layer c
 as a live notification instead of a silent multi-minute wait. Fall back to Bash (same
 output, shown at the end) on harnesses without a Monitor-equivalent.
 
+Every stderr line is prefixed with `[mm:ss]` elapsed time, so a slow phase is visible
+in the log. Filter the monitored output with **exactly** this pattern — do not narrow it:
+
 ```
+grep -E --line-buffered "▶|✓|done \[|error|failed|traceback"
+```
+
+`▶` fires when a layer starts, `done [n/total]` after **every** finished check (the
+user must see steady per-check movement through the long LLM phases — never filter
+these out), and `✓` once per completed phase with its duration. The final `✓ HTML
+report: file://…` (and `✓ Markdown report: …`) lines pass the same filter — always
+relay them to the user, who otherwise has no way to know the report files exist.
+
+```
+echo "[uv] resolving scanner dependencies (first run downloads semgrep, ~1-2 min; cached after)…" >&2
 uv run --with detect-secrets --with pip-audit --with semgrep \
   <skill_scripts_dir>/run_gap_analysis.py <repo> \
   --ref <ref>                    # optional
   --policy <path>                # optional
-  --out gap-report.md            # or --html gap-report.html for a browser-viewable report
+  --out gap-report.md            # Markdown report; gap-report.html is always written too
+  --html <path>                  # optional: custom path for the HTML report
+  --open                         # optional: open the HTML report in the browser
   --no-llm                       # optional: skip LLM checks (Layer 2, and Layer 4 evidence judging)
 ```
 
-The `--with` extras give Layer 1 its full scanners (secret scan, dependency CVEs,
-SAST); `uv` resolves them per run, nothing is installed globally. Dropping them
-still works — Layer 1 degrades to its built-in fallbacks and says so in the report.
+Keep the `echo` line: `uv` resolves the `--with` extras before Python starts and
+prints nothing to a non-TTY until installation finishes, so on a cold cache the run
+looks hung without it. The extras give Layer 1 its full scanners (secret scan,
+dependency CVEs, SAST); nothing is installed globally. Dropping them still works —
+Layer 1 degrades to its built-in fallbacks and says so in the report.
 
 Full flag reference (including `--fix`, `--select`, `--verify`, `--env-file`): run
 `uv run <skill_scripts_dir>/run_gap_analysis.py --help`.
 
 ### 3. Summarize the report
 
-Read the written report back and summarize for the user:
+Relay the `✓ HTML report: file://…` link the script printed (the browser is never
+opened automatically), then read the written report back and summarize for the user:
 - The composite finding count and severity breakdown.
 - The **remediation posture** (Patch / Hybrid / Re-platform) and its one-line rationale.
   See [references/remediation-paths.md](references/remediation-paths.md) if the user
@@ -124,9 +143,12 @@ Read the written report back and summarize for the user:
 
 - Any regulatory (`POL-DR-*`) findings deserve their own framing: they come from the
   org's own DataRobot risk-management policy, and each one names the DataRobot
-  platform feature that satisfies it. Propose adapting the architecture to deploy
-  through DataRobot and adopt those features (that is how the org complies with its
-  EU AI Act policy), rather than treating them as code bugs to patch.
+  platform feature that satisfies it plus how to enable it (Pulumi settings block,
+  API/console step, or automatic on deployment). On a repo that already carries a
+  pulumi-datarobot program, the IaC-satisfiable ones (drift/accuracy/fairness
+  settings, notification policies, guards) are offered as assisted `--fix` edits to
+  the Pulumi resources; the rest still mean adapting the architecture to deploy
+  through DataRobot rather than treating them as code bugs to patch.
 
 The developer can ask follow-up questions in this same conversation (why a condition
 fired, what a specific fix changes, what a risk-management mitigation requires); the

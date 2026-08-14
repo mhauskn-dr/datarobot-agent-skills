@@ -9,6 +9,7 @@ import argparse
 import atexit
 import os
 import sys
+import time
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,15 @@ from .ingest import clone_repo
 from .opencode import OpenCodeServer, OpenCodeWorkerClient, dr_available
 from .report import render_report
 from .report_html import render_html
+
+
+_T0 = time.monotonic()
+
+
+def _status(msg: str) -> None:
+    """Timestamped status line on stderr: elapsed since process start."""
+    m, s = divmod(int(time.monotonic() - _T0), 60)
+    print(f"[{m:02d}:{s:02d}] {msg}", file=sys.stderr, flush=True)
 
 
 def _after_path(html_path: str | None) -> str:
@@ -68,30 +78,22 @@ def _make_llm_client():
     if os.environ.get("GAP_LLM_BACKEND", "opencode") != "opencode":
         return None
     if not dr_available():
-        print(
-            "→ dr CLI not found; LLM checks fall back to direct API calls (litellm).",
-            file=sys.stderr,
-            flush=True,
+        _status(
+            "→ dr CLI not found; LLM checks fall back to direct API calls (litellm)."
         )
         return None
     server = OpenCodeServer()
     try:
         url = server.start()
     except Exception as e:  # noqa: BLE001
-        print(
+        _status(
             f"→ dr opencode server failed to start ({e}); "
-            "falling back to direct API calls (litellm).",
-            file=sys.stderr,
-            flush=True,
+            "falling back to direct API calls (litellm)."
         )
         return None
     atexit.register(server.stop)
     client = OpenCodeWorkerClient(url, cwd=server.workdir)
-    print(
-        f"→ LLM checks run through dr opencode ({client.model}).",
-        file=sys.stderr,
-        flush=True,
-    )
+    _status(f"→ LLM checks run through dr opencode ({client.model}).")
     return client
 
 
@@ -110,21 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--html",
-        nargs="?",
-        const="gap-report.html",
         metavar="PATH",
-        help="render a styled HTML report to PATH (default: gap-report.html) "
-        "and open it in the browser",
+        help="path for the styled HTML report, which is always written "
+        "(default: gap-report.html). A clickable file:// link is printed; "
+        "the browser is only launched with --open",
     )
     ap.add_argument(
-        "--gui",
+        "--open",
         action="store_true",
-        help="shorthand for --html gap-report.html (open the report in a browser)",
-    )
-    ap.add_argument(
-        "--no-open",
-        action="store_true",
-        help="with --html/--gui, write the file but do not launch a browser",
+        help="open the HTML report(s) in the default browser after writing",
     )
     ap.add_argument(
         "--env-file",
@@ -170,17 +166,16 @@ def main(argv: list[str] | None = None) -> int:
         except FileNotFoundError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
-        print(
-            f"→ Loaded {len(keys)} var(s) from {args.env_file}: {', '.join(sorted(keys)) or '(none)'}",
-            file=sys.stderr,
-            flush=True,
+        _status(
+            f"→ Loaded {len(keys)} var(s) from {args.env_file}: "
+            f"{', '.join(sorted(keys)) or '(none)'}"
         )
 
     # Progress goes to stderr so stdout stays clean (report / piping unaffected).
     def progress(msg: str) -> None:
-        print(f"  … {msg}", file=sys.stderr, flush=True)
+        _status(f"  … {msg}")
 
-    print(f"→ Cloning {args.repo} …", file=sys.stderr, flush=True)
+    _status(f"→ Cloning {args.repo} …")
     try:
         workspace = clone_repo(args.repo, args.ref)
     except Exception as e:  # noqa: BLE001
@@ -189,10 +184,8 @@ def main(argv: list[str] | None = None) -> int:
 
     llm_client = _make_llm_client() if not args.no_llm else None
 
-    print(
-        "→ Analyzing (Layer 2/4 LLM checks run in parallel; use --no-llm to skip) …",
-        file=sys.stderr,
-        flush=True,
+    _status(
+        "→ Analyzing (Layer 2/4 LLM checks run in parallel; use --no-llm to skip) …"
     )
     result, policy = analyze(
         workspace,
@@ -202,37 +195,32 @@ def main(argv: list[str] | None = None) -> int:
         progress=progress,
         max_workers=args.workers,
     )
-    print(
+    _status(
         f"→ Analysis complete — {len(result.findings)} gaps "
-        f"({result.posture.get('recommendation', '')}).",
-        file=sys.stderr,
-        flush=True,
+        f"({result.posture.get('recommendation', '')})."
     )
     report = render_report(result, repo=args.repo, policy=policy)
 
     if args.out:
         Path(args.out).write_text(report)
-        print(f"Report written to {args.out}")
-    elif not (args.html or args.gui):
+        print(f"✓ Markdown report: {Path(args.out).resolve()}")
+    elif not args.html:
         print(report)
 
-    html_path = args.html or ("gap-report.html" if args.gui else None)
-    if html_path:
-        out = Path(html_path).resolve()
-        out.write_text(render_html(result, repo=args.repo, policy=policy))
-        print(f"HTML report written to {out}")
-        if not args.no_open:
-            webbrowser.open(out.as_uri())
+    html_path = args.html or "gap-report.html"
+    out = Path(html_path).resolve()
+    out.write_text(render_html(result, repo=args.repo, policy=policy))
+    print(f"✓ HTML report: {out.as_uri()}")
+    if args.open:
+        webbrowser.open(out.as_uri())
 
     if args.fix:
         selected = (
             set(s.strip() for s in args.select.split(",")) if args.select else None
         )
-        print(
+        _status(
             f"→ Applying fixes ({'selected: ' + ','.join(sorted(selected)) if selected else 'all auto-fixable'}) "
-            "on a gap-fixes/* branch …",
-            file=sys.stderr,
-            flush=True,
+            "on a gap-fixes/* branch …"
         )
         summary = fix(
             workspace,
@@ -278,11 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if args.verify:
-            print(
-                "\n→ Re-analyzing the fixed branch to score deploy-readiness …",
-                file=sys.stderr,
-                flush=True,
-            )
+            _status("→ Re-analyzing the fixed branch to score deploy-readiness …")
             after, _ = analyze(
                 workspace,
                 args.policy,
@@ -322,19 +306,17 @@ def main(argv: list[str] | None = None) -> int:
                     after, repo=args.repo, policy=policy, verification=verification
                 )
             )
-            print(f"Post-fix report written to {after_out}")
-            if not args.no_open:
+            print(f"✓ Post-fix report: {after_out.as_uri()}")
+            if args.open:
                 webbrowser.open(after_out.as_uri())
             verdict = (
                 "READY to deploy"
                 if ready
                 else f"NOT READY — {remaining} {'/'.join(fail_on_list)} gap(s) remain"
             )
-            print(
+            _status(
                 f"→ Deploy-readiness: {verdict}. {len(before_keys - after_keys)} gaps closed "
-                f"({len(result.findings)} → {len(after.findings)}).",
-                file=sys.stderr,
-                flush=True,
+                f"({len(result.findings)} → {len(after.findings)})."
             )
 
     # Exit non-zero if any fail_on-severity gaps exist (CI-friendly).

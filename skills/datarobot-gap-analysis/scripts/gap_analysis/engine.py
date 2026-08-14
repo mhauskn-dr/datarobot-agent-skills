@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,11 @@ def analyze(
         if progress:
             progress(msg)
 
+    def _phase(label: str, started: float, detail: str) -> None:
+        # One distinct, greppable line per completed phase: progress monitors
+        # should match on "✓" to get phase-level events instead of per-check spam.
+        _tick(f"✓ {label} complete — {detail} in {time.monotonic() - started:.1f}s")
+
     policy = load_policy(policy_path)
     taxonomy = Taxonomy.load()
     taxonomy.apply_severity_overrides(policy.get("severity_overrides", {}))
@@ -48,59 +55,88 @@ def analyze(
     max_bytes = int(policy.get("scan", {}).get("max_file_bytes", 200_000))
 
     result = AnalysisResult()
-    _tick("Building file inventory…")
+    t0 = time.monotonic()
+    _tick("▶ Indexing repository files…")
     result.inventory = build_inventory(workspace, exclude)
+    _phase("repo index", t0, f"{len(result.inventory.get('files', []))} files")
 
-    # Layer 1 — deterministic
-    _tick("Layer 1 (scanners: secrets, dependencies, SAST, tests/CI)…")
-    f1, n1 = run_layer1(workspace, taxonomy, exclude)
-    result.findings += f1
-    result.notes += n1
+    # The layers only read the inventory and are independent of each other, so
+    # they run in three concurrent lanes: Layer 1 (subprocess scanners, often
+    # the slowest), Layer 3 (instant), and Layers 2+4 sequentially in one lane
+    # so LLM concurrency stays at `max_workers` rather than doubling.
+    def _lane_layer1():
+        started = time.monotonic()
+        _tick("▶ Layer 1 (scanners): secrets, dependencies, SAST, tests/CI…")
+        f1, n1 = run_layer1(workspace, taxonomy, exclude, progress=_tick)
+        _phase("Layer 1 (scanners)", started, f"{len(f1)} finding(s)")
+        return f1, n1
 
-    # Layer 3 — conformance
-    _tick("Layer 3 (policy conformance)…")
-    f3, n3 = check_conformance(result.inventory, policy, taxonomy)
-    result.findings += f3
-    result.notes += n3
+    def _lane_layer3():
+        started = time.monotonic()
+        _tick("▶ Layer 3 (conformance): repo vs policy…")
+        f3, n3 = check_conformance(result.inventory, policy, taxonomy)
+        _phase("Layer 3 (conformance)", started, f"{len(f3)} finding(s)")
+        return f3, n3
 
-    # Layer 2: LLM reasoning
-    client = get_client(llm_client) if use_llm else None
-    if use_llm and client is None:
-        _tick("No LLM client configured, skipping Layer 2 (set GAP_LLM_MODEL + creds).")
-    f2, s2, n2 = run_layer2(
-        client,
-        workspace,
-        result.inventory,
-        taxonomy,
-        max_bytes,
-        _tick,
-        max_workers=max_workers,
-    )
-    result.findings += f2
-    result.skipped += s2
-    result.notes += n2
-
-    # Layer 4: regulatory. The org's DataRobot risk-management policy decides
-    # what is required; the same LLM client judges whether the repo shows
-    # evidence for each requirement (see risk_management.py). Without an LLM,
-    # requirements are still fetched and reported as not assessed.
-    packs = policy.get("regulatory", {}).get("packs", [])
-    if "eu_ai_act" in (packs or []):
-        policy_name = policy.get("regulatory", {}).get(
-            "policy_name", EU_AI_ACT_POLICY_NAME
-        )
-        f4, coverage4, n4 = run_dynamic_layer4(
+    def _lane_llm():
+        # Layer 2, then Layer 4: the org's DataRobot risk-management policy
+        # decides what Layer 4 requires; the same LLM client judges whether
+        # the repo shows evidence for each requirement (risk_management.py).
+        # Without an LLM, requirements are still fetched and reported as not
+        # assessed.
+        started = time.monotonic()
+        client = get_client(llm_client) if use_llm else None
+        if use_llm and client is None:
+            _tick(
+                "No LLM client configured, skipping Layer 2 (set GAP_LLM_MODEL + creds)."
+            )
+        f2, s2, n2 = run_layer2(
             client,
             workspace,
             result.inventory,
-            policy_name,
+            taxonomy,
             max_bytes,
-            progress=_tick,
+            _tick,
             max_workers=max_workers,
         )
-        result.findings += f4
-        result.regulatory_coverage += coverage4
-        result.notes += n4
+        if client is not None:
+            _phase("Layer 2 (LLM reasoning)", started, f"{len(f2)} finding(s)")
+
+        f4: list = []
+        coverage4: list = []
+        n4: list = []
+        packs = policy.get("regulatory", {}).get("packs", [])
+        if "eu_ai_act" in (packs or []):
+            started = time.monotonic()
+            policy_name = policy.get("regulatory", {}).get(
+                "policy_name", EU_AI_ACT_POLICY_NAME
+            )
+            f4, coverage4, n4 = run_dynamic_layer4(
+                client,
+                workspace,
+                result.inventory,
+                policy_name,
+                max_bytes,
+                progress=_tick,
+                max_workers=max_workers,
+            )
+            _phase("Layer 4 (regulatory)", started, f"{len(f4)} finding(s)")
+        return f2, s2, n2, f4, coverage4, n4
+
+    with ThreadPoolExecutor(max_workers=3) as lanes:
+        fut1 = lanes.submit(_lane_layer1)
+        fut3 = lanes.submit(_lane_layer3)
+        fut_llm = lanes.submit(_lane_llm)
+        f1, n1 = fut1.result()
+        f3, n3 = fut3.result()
+        f2, s2, n2, f4, coverage4, n4 = fut_llm.result()
+
+    # Aggregate in a fixed order so reports stay deterministic regardless of
+    # which lane finished first.
+    result.findings += f1 + f3 + f2 + f4
+    result.notes += n1 + n3 + n2 + n4
+    result.skipped += s2
+    result.regulatory_coverage += coverage4
 
     result.findings = _dedup(result.findings)
     _tick("Scoring remediation posture…")

@@ -36,11 +36,16 @@ def _esc(s: Any) -> str:
 def _cli_prog() -> str:
     """How to invoke the CLI in the copied commands.
 
-    Prefer the `gap-analysis` console script that sits next to the running
-    interpreter (the venv case) so the command runs WITHOUT activating the venv.
-    Fall back to a bare `gap-analysis` (works if it's already on PATH; the report's
-    Prerequisites note covers the not-installed case).
+    In the vendored-skill case there is no installed console script: the
+    runnable entrypoint is scripts/run_gap_analysis.py two levels up from this
+    module, launched through `uv run` (uv is a skill prerequisite), so the
+    copied command works from any directory with no venv activation. Fall back
+    to a `gap-analysis` console script for the installed-package case.
     """
+    launcher = Path(__file__).resolve().parent.parent / "run_gap_analysis.py"
+    if launcher.exists():
+        path = str(launcher)
+        return f'uv run "{path}"' if " " in path else f"uv run {path}"
     sibling = Path(sys.executable).resolve().parent / "gap-analysis"
     if sibling.exists():
         return str(sibling)
@@ -140,6 +145,10 @@ def render_html(
 
     # Header
     body.append('<header class="hdr">')
+    body.append(
+        '<button id="themebtn" class="themebtn" onclick="cycleTheme()" '
+        'title="Switch theme: auto (system) / light / dark">◐ Auto</button>'
+    )
     body.append("<h1>Enterprise-Readiness Gap Report</h1>")
     meta = []
     if repo:
@@ -155,16 +164,23 @@ def render_html(
     if verification:
         body.append(_verification_banner(verification))
 
-    # Prerequisites note — the fix buttons copy a terminal command; this explains
-    # how to make the CLI available if `gap-analysis` is "command not found".
+    # Prerequisites note — the fix buttons copy a terminal command; nothing is
+    # executed from this page.
     if any(f.fix_type in ("auto", "assisted") for f in result.findings):
-        body.append(
-            '<p class="prereq">ℹ️ The fix buttons copy a terminal command for you to run. '
-            "If you get <code>gap-analysis: command not found</code>, the CLI isn't on your "
-            "PATH — activate its virtualenv (<code>source .venv/bin/activate</code>) or install "
-            "it (<code>pipx install</code> / <code>pip install -e .</code>). Copied commands use "
-            "the resolved CLI path when one is found.</p>"
-        )
+        if _cli_prog().startswith("uv run"):
+            body.append(
+                '<p class="prereq">ℹ️ The fix buttons copy a terminal command for you to '
+                "run — nothing is executed from this page. Commands launch the engine via "
+                "<code>uv run</code> with an absolute script path, so they work from any "
+                "directory; fixes land on a <code>gap-fixes/*</code> branch for review.</p>"
+            )
+        else:
+            body.append(
+                '<p class="prereq">ℹ️ The fix buttons copy a terminal command for you to run. '
+                "If you get <code>gap-analysis: command not found</code>, the CLI isn't on your "
+                "PATH — activate its virtualenv (<code>source .venv/bin/activate</code>) or install "
+                "it (<code>pipx install</code> / <code>pip install -e .</code>).</p>"
+            )
 
     # Posture banner
     if result.posture:
@@ -406,19 +422,47 @@ _DOC = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gap Report</title>
+<script>
+try{var _t=localStorage.getItem('gap-theme');
+if(_t==='light'||_t==='dark')document.documentElement.setAttribute('data-theme',_t);}catch(e){}
+</script>
 <style>
 :root{
-  --crit:#d92d20; --high:#e8801a; --med:#caa800; --low:#667085;
+  --crit:#d92d20; --high:#e8801a; --med:#caa800; --med-ink:#8a7400; --low:#667085;
   --bg:#f6f7f9; --card:#fff; --line:#e4e7ec; --ink:#1d2433; --muted:#667085;
+  --accent:#3538cd; --accent-bg:#eef2ff;
+  --ok:#0a7d3c; --ok-bg:#e7f6ec; --bad:#b42318; --bad-bg:#fdecea;
+  --warn-bg:#fff8e6; --warn-line:#f3e1b0; --warn-ink:#6b5a16;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --med-ink:#d3b322; --low:#98a2b3;
+    --bg:#0d1117; --card:#161b22; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
+    --accent:#8098f9; --accent-bg:#22284e;
+    --ok:#3fb968; --ok-bg:#15301d; --bad:#f07567; --bad-bg:#3a1f1c;
+    --warn-bg:#2c2712; --warn-line:#5a4d1f; --warn-ink:#dfc266;
+  }
+}
+:root[data-theme="dark"]{
+  --med-ink:#d3b322; --low:#98a2b3;
+  --bg:#0d1117; --card:#161b22; --line:#30363d; --ink:#e6edf3; --muted:#8b949e;
+  --accent:#8098f9; --accent-bg:#22284e;
+  --ok:#3fb968; --ok-bg:#15301d; --bad:#f07567; --bad-bg:#3a1f1c;
+  --warn-bg:#2c2712; --warn-line:#5a4d1f; --warn-ink:#dfc266;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 .wrap{max-width:960px;margin:0 auto;padding:28px 20px 60px}
+.hdr{position:relative}
+.themebtn{position:absolute;top:0;right:0;cursor:pointer;border:1px solid var(--line);
+  background:var(--card);color:var(--muted);border-radius:8px;padding:5px 12px;
+  font-size:12px;font-weight:600}
+.themebtn:hover{color:var(--ink)}
 h1{font-size:22px;margin:0 0 6px} h2{font-size:16px;margin:26px 0 12px}
 .meta,.sub{color:var(--muted)} .meta{margin:4px 0 0}
-.prereq{margin:14px 0 0;padding:9px 12px;background:#fff8e6;border:1px solid #f3e1b0;
-  border-radius:8px;color:#6b5a16;font-size:13px}
+.prereq{margin:14px 0 0;padding:9px 12px;background:var(--warn-bg);border:1px solid var(--warn-line);
+  border-radius:8px;color:var(--warn-ink);font-size:13px}
 .prereq code{background:#0d1117;color:#e6edf3;padding:1px 6px;border-radius:4px;font-size:12px}
 /* post-fix verification */
 .verify{margin:14px 0 0;border-radius:12px;padding:16px 18px;color:#fff}
@@ -454,7 +498,7 @@ section{margin-top:18px}
 .chip.active{outline:2px solid #1570ef33}
 .chip-critical{border-color:var(--crit);color:var(--crit)}
 .chip-high{border-color:var(--high);color:var(--high)}
-.chip-medium{border-color:var(--med);color:#8a7400}
+.chip-medium{border-color:var(--med);color:var(--med-ink)}
 .chip-low{border-color:var(--low);color:var(--low)}
 /* findings */
 .findings-head{display:flex;align-items:center;justify-content:space-between}
@@ -467,7 +511,7 @@ details.pillar>summary::-webkit-details-marker{display:none}
 .pill-id{color:var(--muted);font-weight:500}
 .count{float:right;background:var(--bg);border-radius:999px;padding:1px 9px;color:var(--muted)}
 .card{border:1px solid var(--line);border-left:4px solid var(--low);border-radius:8px;
-  padding:11px 13px;margin:9px 0;background:#fff}
+  padding:11px 13px;margin:9px 0;background:var(--card)}
 .card.sev-critical{border-left-color:var(--crit)}
 .card.sev-high{border-left-color:var(--high)}
 .card.sev-medium{border-left-color:var(--med)}
@@ -480,31 +524,31 @@ details.pillar>summary::-webkit-details-marker{display:none}
 .tag-sev{color:#fff}
 .tag-critical{background:var(--crit)} .tag-high{background:var(--high)}
 .tag-medium{background:var(--med)} .tag-low{background:var(--low)}
-.tag-fix{background:#eef2ff;color:#3538cd}
-.tag-plumbing{background:#e7f6ec;color:#0a7d3c}
-.tag-business_logic{background:#fdecea;color:#b42318}
+.tag-fix{background:var(--accent-bg);color:var(--accent)}
+.tag-plumbing{background:var(--ok-bg);color:var(--ok)}
+.tag-business_logic{background:var(--bad-bg);color:var(--bad)}
 .kv{display:flex;gap:10px;padding:2px 0}
 .kv .k{flex:0 0 116px;color:var(--muted);font-size:12px;text-transform:uppercase;
   letter-spacing:.3px;padding-top:1px}
 .kv .v{flex:1} .kv code{background:var(--bg);padding:1px 5px;border-radius:4px}
 .empty{color:var(--muted)}
 /* scorecards */
-table{border-collapse:collapse;width:100%;background:#fff;border:1px solid var(--line);
+table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);
   border-radius:8px;overflow:hidden}
 th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line)}
 th{background:var(--bg);font-size:12px;text-transform:uppercase;color:var(--muted)}
 tr:last-child td{border-bottom:none}
-.st{font-weight:700} .st.gap{color:var(--crit)} .st.pass{color:#0a7d3c} .st.skip{color:var(--muted)}
+.st{font-weight:700} .st.gap{color:var(--crit)} .st.pass{color:var(--ok)} .st.skip{color:var(--muted)}
 .notes ul{margin:0;padding-left:18px}
 footer{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);
   padding-top:12px}
 /* fix actions */
 .head-actions{display:flex;gap:8px;align-items:center}
-.fixbtn{cursor:pointer;border:1px solid #3538cd;background:#eef2ff;color:#3538cd;
+.fixbtn{cursor:pointer;border:1px solid var(--accent);background:var(--accent-bg);color:var(--accent);
   border-radius:6px;padding:4px 11px;font-size:12px;font-weight:700;white-space:nowrap}
-.fixbtn:hover{background:#3538cd;color:#fff}
-.fixbtn.fixall{border-color:#0a7d3c;background:#e7f6ec;color:#0a7d3c}
-.fixbtn.fixall:hover{background:#0a7d3c;color:#fff}
+.fixbtn:hover{background:var(--accent);color:#fff}
+.fixbtn.fixall{border-color:var(--ok);background:var(--ok-bg);color:var(--ok)}
+.fixbtn.fixall:hover{background:var(--ok);color:#fff}
 .fixbtn.migrate{margin-top:10px;border-color:#fff;background:rgba(255,255,255,.18);color:#fff}
 .fixbtn.migrate:hover{background:#fff;color:#b42318}
 .card-action{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:9px;
@@ -512,10 +556,10 @@ footer{margin-top:30px;color:var(--muted);font-size:12px;border-top:1px solid va
 .card-action .cmd{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#0d1117;
   color:#e6edf3;padding:3px 8px;border-radius:5px;user-select:all}
 .card-action .warn{font-size:12px;color:var(--crit);font-weight:600}
-.card-action .ok{font-size:12px;color:#0a7d3c;font-weight:600}
+.card-action .ok{font-size:12px;color:var(--ok);font-weight:600}
 .card-action .manual{font-size:12px;color:var(--muted)}
 #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);
-  background:#1d2433;color:#fff;padding:10px 16px;border-radius:8px;font-size:13px;
+  background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:13px;
   box-shadow:0 6px 24px #0003;opacity:0;pointer-events:none;transition:.2s;max-width:80vw}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast code{background:rgba(255,255,255,.18);padding:1px 6px;border-radius:4px}
@@ -566,6 +610,19 @@ function toggleAll(){
   ps.forEach(p=>p.open=!anyOpen);
   document.querySelector('.toggle-all').textContent=anyOpen?'Expand all':'Collapse all';
 }
+function applyTheme(t){
+  if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}
+  else{document.documentElement.removeAttribute('data-theme');t='auto';}
+  var b=document.getElementById('themebtn');
+  if(b) b.textContent=(t==='auto'?'\u25d0 Auto':(t==='light'?'\u2600 Light':'\u263e Dark'));
+  try{localStorage.setItem('gap-theme',t);}catch(e){}
+}
+function cycleTheme(){
+  var cur='auto'; try{cur=localStorage.getItem('gap-theme')||'auto';}catch(e){}
+  applyTheme(cur==='auto'?'light':(cur==='light'?'dark':'auto'));
+}
+(function(){var t='auto';try{t=localStorage.getItem('gap-theme')||'auto';}catch(e){}
+applyTheme(t);})();
 </script>
 </body>
 </html>

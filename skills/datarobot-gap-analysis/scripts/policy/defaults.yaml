@@ -35,6 +35,7 @@ it_admin:
     allow:
       - "anthropic/claude-*"
       - "datarobot/*"
+      - "datarobotdev/*"
       - "openai/gpt-5*"
       - "openai/gpt-4.1*"
       - "google/gemini-2.5*"
@@ -54,6 +55,7 @@ it_admin:
       - "python:3.12*"
       - "python:3.13*"
       - "datarobot/*"
+      - "datarobotdev/*"
 
 regulatory:
   # Which regulatory packs (Layer 4) to run. Extensible: add gdpr, soc2, nist_ai_rmf.
@@ -62,9 +64,11 @@ regulatory:
   # for this pack, not a fallback to a generic checklist.
   packs:
     - "eu_ai_act"
-  # Name of the DataRobot risk-management policy to look up for the eu_ai_act
-  # pack. Change this if the org's policy isn't named "EU AI Act" (e.g. a
-  # custom policy they authored under a different name).
+  # Name (or id) of the DataRobot risk-management policy to look up for the
+  # eu_ai_act pack. Change this if the org's policy isn't named "EU AI Act"
+  # (e.g. a custom policy under a different name). On a name collision the
+  # org's own policy wins over the built-in; a policy id is the unambiguous
+  # form when several tenant policies share a name.
   policy_name: "EU AI Act"
 
 # Per-condition severity overrides (key = condition id)

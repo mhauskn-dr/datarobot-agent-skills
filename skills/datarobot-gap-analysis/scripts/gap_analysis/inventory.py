@@ -173,6 +173,7 @@ def build_inventory(
         "python_version": detect_python_version(root),
         "dependencies": extract_dependencies(root),
         "model_ids": extract_model_ids(root, exclude),
+        "declared_licenses": extract_declared_licenses(root, exclude),
         "base_images": extract_base_images(root, exclude),
     }
 
@@ -260,6 +261,34 @@ def extract_dependencies(root: Path) -> list[str]:
             pass
 
     return sorted(deps)
+
+
+_PYPROJECT_LICENSE_RE = re.compile(
+    r'^license\s*=\s*(?:\{\s*text\s*=\s*)?["\']([^"\']+)["\']', re.M
+)
+
+
+def extract_declared_licenses(root: Path, exclude: list[str]) -> list[list[str]]:
+    """[(manifest rel path, declared SPDX license), ...] from package.json and
+    pyproject.toml. Only the repo's own declared license: dependency licenses
+    need registry/installed metadata that isn't available offline."""
+    out: list[list[str]] = []
+    for p, rel in _iter_files(root, exclude):
+        if p.name == "package.json":
+            try:
+                lic = json.loads(p.read_text(errors="ignore")).get("license")
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(lic, str) and lic:
+                out.append([rel, lic])
+        elif p.name == "pyproject.toml":
+            try:
+                m = _PYPROJECT_LICENSE_RE.search(p.read_text(errors="ignore"))
+            except OSError:
+                continue
+            if m:
+                out.append([rel, m.group(1)])
+    return out
 
 
 def extract_model_ids(root: Path, exclude: list[str]) -> list[str]:
